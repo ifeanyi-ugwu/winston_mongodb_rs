@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread;
-use tokio::runtime::Runtime;
+use tokio::runtime::Builder;
 use winston_transport::Transport;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -38,7 +38,7 @@ impl MongoDBTransport {
         let options_clone = options.clone();
 
         let join_handle = Some(thread::spawn(move || {
-            let rt = Runtime::new().unwrap();
+            let rt = Builder::new_current_thread().build().unwrap();
 
             rt.block_on(async {
                 let client = Client::with_uri_str(&options_clone.connection_string)
