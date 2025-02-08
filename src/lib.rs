@@ -109,3 +109,57 @@ impl Drop for MongoDBTransport {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mongodb::{bson::doc, options::ClientOptions};
+    use std::env;
+    use tokio;
+
+    #[tokio::test]
+    async fn test_logging_persists_to_mongodb() {
+        dotenv::dotenv().ok();
+
+        let connection_string = env::var("MONGODB_URI").expect("MONGODB_URI must be set");
+
+        let options = MongoDBOptions {
+            connection_string,
+            database: "winston_mongodb_test_db".to_string(),
+            collection: "logs".to_string(),
+            level: Some("info".to_string()),
+            format: None,
+        };
+
+        let transport = MongoDBTransport::new(options.clone()).unwrap();
+
+        let log_info = LogInfo {
+            level: "info".to_string(),
+            message: "Test log message".to_string(),
+            meta: HashMap::new(),
+        };
+
+        transport.log(log_info);
+
+        // Allow some time for the log to be inserted
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        // Verify if the log exists in the database
+        let client = Client::with_options(
+            ClientOptions::parse(&options.connection_string)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        let db = client.database(&options.database);
+        let collection = db.collection::<LogDocument>(&options.collection);
+
+        let filter = doc! { "message": "Test log message" };
+        let result = collection.find_one(filter.clone()).await.unwrap();
+
+        assert!(result.is_some(), "Log entry was not found in MongoDB");
+
+        // Cleanup: Delete the test log
+        collection.delete_one(filter).await.unwrap();
+    }
+}
