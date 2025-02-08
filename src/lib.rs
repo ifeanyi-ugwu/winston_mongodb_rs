@@ -38,7 +38,11 @@ impl MongoDBTransport {
         let options_clone = options.clone();
 
         let join_handle = Some(thread::spawn(move || {
-            let rt = Builder::new_current_thread().build().unwrap();
+            let rt = Builder::new_current_thread()
+                .enable_time()
+                .enable_io()
+                .build()
+                .unwrap();
 
             rt.block_on(async {
                 let client = Client::with_uri_str(&options_clone.connection_string)
