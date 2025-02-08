@@ -2,10 +2,14 @@ use chrono::{DateTime, Utc};
 use logform::{Format, LogInfo};
 use mongodb::{bson::doc, Client};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
-use std::thread;
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc,
+    },
+    thread,
+};
 use tokio::runtime::Builder;
 use winston_transport::Transport;
 
