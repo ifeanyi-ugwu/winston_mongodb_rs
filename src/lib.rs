@@ -3,7 +3,8 @@ use logform::{Format, LogInfo};
 use mongodb::{bson::doc, Client};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::thread;
 use tokio::runtime::Builder;
 use winston_transport::Transport;
@@ -21,6 +22,7 @@ pub struct MongoDBTransport {
     sender: mpsc::Sender<LogDocument>,
     join_handle: Option<thread::JoinHandle<()>>,
     options: MongoDBOptions,
+    exit_signal: Arc<AtomicBool>,
 }
 
 #[derive(Clone)]
@@ -36,6 +38,8 @@ impl MongoDBTransport {
     pub fn new(options: MongoDBOptions) -> Result<Self, mongodb::error::Error> {
         let (sender, receiver) = mpsc::channel();
         let options_clone = options.clone();
+        let exit_signal = Arc::new(AtomicBool::new(false));
+        let exit_signal_clone = exit_signal.clone();
 
         let join_handle = Some(thread::spawn(move || {
             let rt = Builder::new_current_thread()
@@ -51,9 +55,15 @@ impl MongoDBTransport {
                 let db = client.database(&options_clone.database);
                 let collection = db.collection::<LogDocument>(&options_clone.collection);
 
-                for log in receiver {
-                    if let Err(e) = collection.insert_one(log).await {
-                        eprintln!("Failed to write to MongoDB: {}", e);
+                while !exit_signal_clone.load(Ordering::Relaxed) {
+                    match receiver.recv_timeout(std::time::Duration::from_millis(100)) {
+                        Ok(log) => {
+                            if let Err(e) = collection.insert_one(log).await {
+                                eprintln!("Failed to write to MongoDB: {}", e);
+                            }
+                        }
+                        Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     }
                 }
             });
@@ -63,6 +73,7 @@ impl MongoDBTransport {
             sender,
             join_handle,
             options,
+            exit_signal,
         })
     }
 }
@@ -92,6 +103,7 @@ impl Transport for MongoDBTransport {
 
 impl Drop for MongoDBTransport {
     fn drop(&mut self) {
+        self.exit_signal.store(true, Ordering::Relaxed);
         if let Some(handle) = self.join_handle.take() {
             handle.join().unwrap();
         }
