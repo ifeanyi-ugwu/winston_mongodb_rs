@@ -2,6 +2,8 @@
 name = "winston_mongodb"
 version = "0.1.0"
 edition = "2021"
+description = "winston-mongodb for rust"
+license = "MIT"
 authors = ["ifeanyi ugwu"]
 keywords = ["winston", "logger", "logging"]
 repository = "https://github.com/ifeanyi-ugwu/winston_mongodb_rs"
