@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use logform::{Format, LogInfo};
 use mongodb::{
-    bson::{self, doc, Bson, Document},
+    bson::{self, doc, Document},
     options::{FindOptions, IndexOptions},
     Client, Collection, IndexModel,
 };
@@ -103,10 +103,10 @@ impl MongoDBTransport {
         // Add timestamp range filters
         let mut timestamp_filter = Document::new();
         if let Some(from) = query.from {
-            timestamp_filter.insert("$gte", datetime_to_bson(from));
+            timestamp_filter.insert("$gte", from);
         }
         if let Some(until) = query.until {
-            timestamp_filter.insert("$lte", datetime_to_bson(until));
+            timestamp_filter.insert("$lte", until);
         }
         if !timestamp_filter.is_empty() {
             filter.insert("timestamp", timestamp_filter);
@@ -203,10 +203,6 @@ impl MongoDBTransport {
 
         Ok(results)
     }
-}
-
-fn datetime_to_bson(dt: DateTime<Utc>) -> Bson {
-    Bson::DateTime(bson::DateTime::from_chrono(dt))
 }
 
 fn document_to_loginfo(doc: LogDocument) -> LogInfo {
