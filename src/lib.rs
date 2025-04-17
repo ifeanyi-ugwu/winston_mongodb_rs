@@ -117,16 +117,13 @@ impl MongoDBTransport {
             filter.insert("level", doc! { "$in": &query.levels });
         }
 
-        // Add text search if specified
-        if let Some(search_term) = &query.search_term {
+        if let Some(search_regex) = &query.search_term {
             filter.insert(
-                "$text",
+                "message",
                 doc! {
-                    "$search": search_term
+                    "$regex": search_regex.as_str()
                 },
             );
-            // text search is faster and more optimized then regex but behaves weird eg(search_term of `log 1` matches `log` and `1`)
-            // changing the search_term in LogQuery to a rust regex and converting it to mongodb regex will be more predictable and consistent
         }
 
         // Configure options (sort, skip, limit)
@@ -400,18 +397,15 @@ mod tests {
         // Allow some time for the logs to be inserted and the index created(+2 secs)
         tokio::time::sleep(std::time::Duration::from_secs(2 + 2)).await;
 
-        // Set up the query
-        let query = LogQuery {
-            from: Some(Utc::now() - chrono::Duration::days(1)), // Logs from the past day
-            until: Some(Utc::now()),                            // Logs until now
-            levels: vec!["info".to_string(), "warn".to_string()],
-            //search_term: Some("log 1".to_string()), // Searching for logs with "log 1"
-            search_term: Some("\"log 1\"".to_string()), // Force exact phrase match
-            start: Some(0),                             // Starting from the first log
-            limit: Some(5),                             // Limit the query to 5 logs
-            order: Order::Descending,                   // Sort in descending order by timestamp
-            fields: vec!["level".to_string(), "message".to_string()], // Return only level and message
-        };
+        let query = LogQuery::new()
+            .from("a day ago")
+            .until("now")
+            .levels(vec!["info", "warn"])
+            .search_term("log 1")
+            .start(0)
+            .limit(5)
+            .order("desc")
+            .fields(vec!["level", "message"]);
 
         // Perform the query
         let results = transport.query(&query).unwrap();
