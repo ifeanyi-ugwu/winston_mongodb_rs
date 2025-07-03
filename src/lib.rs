@@ -29,10 +29,16 @@ struct LogDocument {
 }
 
 pub struct MongoDBTransport {
-    sender: mpsc::Sender<LogDocument>,
+    sender: mpsc::Sender<MongoDBThreadMessage>,
     join_handle: Option<thread::JoinHandle<()>>,
     options: MongoDBOptions,
     exit_signal: Arc<AtomicBool>,
+}
+
+enum MongoDBThreadMessage {
+    Log(LogDocument),
+    LogBatch(Vec<LogDocument>),
+    Shutdown,
 }
 
 #[derive(Clone)]
@@ -69,11 +75,20 @@ impl MongoDBTransport {
 
                 while !exit_signal_clone.load(Ordering::Relaxed) {
                     match receiver.recv_timeout(std::time::Duration::from_millis(100)) {
-                        Ok(log) => {
-                            if let Err(e) = collection.insert_one(log).await {
+                        Ok(MongoDBThreadMessage::Log(log_doc)) => {
+                            if let Err(e) = collection.insert_one(log_doc).await {
                                 eprintln!("Failed to write to MongoDB: {}", e);
                             }
                         }
+                        Ok(MongoDBThreadMessage::LogBatch(log_docs)) => {
+                            // Handle the batch
+                            if !log_docs.is_empty() {
+                                if let Err(e) = collection.insert_many(log_docs).await {
+                                    eprintln!("Failed to write batch to MongoDB: {}", e);
+                                }
+                            }
+                        }
+                        Ok(MongoDBThreadMessage::Shutdown) => break,
                         Err(mpsc::RecvTimeoutError::Timeout) => continue,
                         Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     }
@@ -246,8 +261,24 @@ impl Transport for MongoDBTransport {
             meta: info.meta,
         };
 
-        if let Err(e) = self.sender.send(doc) {
+        if let Err(e) = self.sender.send(MongoDBThreadMessage::Log(doc)) {
             eprintln!("Failed to send log to the logging thread: {}", e);
+        }
+    }
+
+    fn log_batch(&self, logs: Vec<LogInfo>) {
+        let docs: Vec<LogDocument> = logs
+            .into_iter()
+            .map(|info| LogDocument {
+                timestamp: Utc::now(), // Consider if timestamp should be added here or earlier
+                level: info.level,
+                message: info.message,
+                meta: info.meta,
+            })
+            .collect();
+
+        if let Err(e) = self.sender.send(MongoDBThreadMessage::LogBatch(docs)) {
+            eprintln!("Failed to send log batch to the logging thread: {}", e);
         }
     }
 
@@ -288,6 +319,7 @@ impl Transport for MongoDBTransport {
 
 impl Drop for MongoDBTransport {
     fn drop(&mut self) {
+        let _ = self.sender.send(MongoDBThreadMessage::Shutdown);
         self.exit_signal.store(true, Ordering::Relaxed);
         if let Some(handle) = self.join_handle.take() {
             handle.join().unwrap();
